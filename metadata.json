@@ -1,0 +1,7 @@
+{
+  "name": "OT Recruiter AI",
+  "description": "A high-stakes interview simulator for Pediatric Occupational Therapists. Practice verbal responses with real-time feedback and AI-driven scoring from a senior recruiter perspective.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
