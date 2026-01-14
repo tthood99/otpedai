@@ -6,29 +6,14 @@ import htm from 'htm';
 
 const html = htm.bind(React.createElement);
 
-// --- Icons (SVG paths for reliability) ---
-const AcademicCapIcon = () => html`
-  <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M12 14l9-5-9-5-9 5 9 5z" />
-    <path strokeLinecap="round" strokeLinejoin="round" d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
-  </svg>
-`;
-
-const MicrophoneIcon = () => html`
-  <svg className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-20a3 3 0 00-3 3v8a3 3 0 006 0V5a3 3 0 00-3-3z" />
-  </svg>
-`;
-
-// --- Data ---
+// --- OT Scenario Data ---
 const OT_QUESTIONS = [
   { id: '1', text: "How do you approach creating a child-centered treatment plan for a 5-year-old with SPD who is tactile avoidant?", timeLimit: 60 },
-  { id: '2', text: "Describe a time you had to manage a difficult conversation with a parent who was resistant to recommendations.", timeLimit: 90 },
-  { id: '3', text: "In a pediatric inpatient setting, how do you prioritize safety while addressing developmental milestones?", timeLimit: 75 },
-  { id: '4', text: "How do you incorporate evidence-based practice into your daily interventions in a busy clinic?", timeLimit: 60 }
+  { id: '2', text: "Describe a time you had to manage a difficult conversation with a parent who was resistant to your clinical recommendations.", timeLimit: 90 },
+  { id: '3', text: "In a pediatric inpatient setting, how do you prioritize safety while still addressing developmental milestones?", timeLimit: 75 }
 ];
 
-// --- Sub-components ---
+// --- Functional Components ---
 const Timer = ({ duration, onComplete, isActive }) => {
   const [timeLeft, setTimeLeft] = useState(duration);
   useEffect(() => {
@@ -53,54 +38,54 @@ const Timer = ({ duration, onComplete, isActive }) => {
 
 const ScoreBar = ({ label, val }) => html`
   <div className="mb-3">
-    <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-1 uppercase">
+    <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-tighter">
       <span>${label}</span>
       <span>${val}%</span>
     </div>
-    <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
+    <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200">
       <div className="h-full bg-indigo-500 transition-all duration-1000" style=${{ width: `${val}%` }} />
     </div>
   </div>
 `;
 
-// --- Main App ---
+// --- Main Application Component ---
 function App() {
   const [status, setStatus] = useState('IDLE');
-  const [currentIdx, setCurrentIdx] = useState(0);
+  const [idx, setIdx] = useState(0);
   const [history, setHistory] = useState([]);
-  const [transcription, setTranscription] = useState('');
-  const recognitionRef = useRef(null);
+  const [transcript, setTranscript] = useState('');
+  const recRef = useRef(null);
 
-  const currentQuestion = OT_QUESTIONS[currentIdx];
+  const question = OT_QUESTIONS[idx];
 
   useEffect(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SR) {
-      const rec = new SR();
-      rec.continuous = true;
-      rec.interimResults = true;
-      rec.onresult = (e) => {
+      const r = new SR();
+      r.continuous = true;
+      r.interimResults = true;
+      r.onresult = (e) => {
         let t = '';
         for (let i = e.resultIndex; i < e.results.length; ++i) {
           if (e.results[i].isFinal) t += e.results[i][0].transcript;
         }
-        setTranscription(prev => (prev + ' ' + t).trim());
+        if (t) setTranscript(prev => (prev + ' ' + t).trim());
       };
-      recognitionRef.current = rec;
+      recRef.current = r;
     }
   }, []);
 
-  const startInterview = () => { setHistory([]); setCurrentIdx(0); setStatus('PREPARING'); };
-  const startRecording = () => { setTranscription(''); setStatus('RECORDING'); try { recognitionRef.current?.start(); } catch(e){} };
+  const start = () => { setHistory([]); setIdx(0); setStatus('PREP'); };
+  const record = () => { setTranscript(''); setStatus('REC'); try { recRef.current?.start(); } catch(e){} };
 
   const analyze = async () => {
-    recognitionRef.current?.stop();
-    setStatus('ANALYZING');
+    recRef.current?.stop();
+    setStatus('WAIT');
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const resp = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `Evaluate Pediatric OT interview response. Q: "${currentQuestion.text}" A: "${transcription || 'No verbal response'}"`,
+        contents: `Evaluate Pediatric OT interview. Question: "${question.text}" Response: "${transcript || 'No response'}"`,
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -110,124 +95,119 @@ function App() {
               clinical: { type: Type.NUMBER },
               empathy: { type: Type.NUMBER },
               comm: { type: Type.NUMBER },
-              prof: { type: Type.NUMBER },
               feedback: { type: Type.STRING }
             },
-            required: ["overall", "clinical", "empathy", "comm", "prof", "feedback"]
+            required: ["overall", "clinical", "empathy", "comm", "feedback"]
           }
         }
       });
       const data = JSON.parse(resp.text);
-      setHistory(prev => [...prev, { q: currentQuestion.text, data }]);
-      if (currentIdx < OT_QUESTIONS.length - 1) {
-        setCurrentIdx(i => i + 1);
-        setStatus('PREPARING');
-      } else {
-        setStatus('FINISHED');
-      }
-    } catch (e) {
-      console.error(e);
-      setStatus('FINISHED');
-    }
+      setHistory(prev => [...prev, { q: question.text, data }]);
+      if (idx < OT_QUESTIONS.length - 1) { setIdx(i => i + 1); setStatus('PREP'); }
+      else { setStatus('DONE'); }
+    } catch (e) { setStatus('DONE'); }
   };
 
   return html`
-    <div className="min-h-screen p-4 md:p-8 bg-slate-50 flex flex-col items-center font-sans">
-      <header className="w-full max-w-3xl flex justify-between items-center mb-8">
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center p-6 font-sans antialiased text-slate-900">
+      <header className="w-full max-w-2xl flex items-center justify-between mb-10 mt-4">
         <div className="flex items-center space-x-3">
-          <div className="p-2 bg-indigo-600 rounded-lg shadow-lg shadow-indigo-100"><${AcademicCapIcon} /></div>
-          <h1 className="text-xl font-bold text-slate-800">Pediatric OT Recruiter</h1>
+          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-100">
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 14l9-5-9-5-9 5 9 5z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" /></svg>
+          </div>
+          <h1 className="text-xl font-bold tracking-tight text-slate-800 uppercase">OT Recruiter AI</h1>
         </div>
-        ${status !== 'IDLE' && status !== 'FINISHED' && html`
-           <span className="text-xs font-bold text-slate-400">Step ${currentIdx + 1} / ${OT_QUESTIONS.length}</span>
+        ${status !== 'IDLE' && status !== 'DONE' && html`
+          <span className="text-xs font-black text-slate-400">QUEST ${idx + 1} / ${OT_QUESTIONS.length}</span>
         `}
       </header>
 
-      <main className="w-full max-w-2xl bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+      <main className="w-full max-w-2xl bg-white rounded-[2rem] shadow-xl shadow-slate-200/50 border border-slate-200 overflow-hidden">
         ${status === 'IDLE' && html`
-          <div className="p-12 text-center">
-             <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center mx-auto mb-6 text-indigo-600">
-               <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>
-             </div>
-             <h2 className="text-3xl font-black mb-4 text-slate-900">OT Recruiter AI</h2>
-             <p className="text-slate-600 mb-10 leading-relaxed">Practice your clinical reasoning with a simulated senior recruiter. Provide verbal answers to common pediatric scenarios.</p>
-             <button onClick=${startInterview} className="px-10 py-4 bg-indigo-600 text-white rounded-2xl font-bold shadow-xl shadow-indigo-100 hover:scale-105 transition-transform">Begin Simulation</button>
+          <div className="p-10 text-center">
+            <div className="w-20 h-20 bg-indigo-50 rounded-3xl flex items-center justify-center mx-auto mb-8 text-indigo-600">
+              <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-20a3 3 0 00-3 3v8a3 3 0 006 0V5a3 3 0 00-3-3z" /></svg>
+            </div>
+            <h2 className="text-3xl font-black mb-4 text-slate-900 leading-tight">Pediatric OT Simulation</h2>
+            <p className="text-slate-500 mb-10 max-w-sm mx-auto leading-relaxed font-medium">Test your clinical reasoning with verbal responses and get professional feedback in seconds.</p>
+            <button onClick=${start} className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-bold shadow-lg shadow-indigo-100 hover:scale-[1.02] active:scale-[0.98] transition-all">Begin Practice</button>
           </div>
         `}
 
-        ${(status === 'PREPARING' || status === 'RECORDING' || status === 'ANALYZING') && html`
+        ${(status === 'PREP' || status === 'REC' || status === 'WAIT') && html`
           <div className="p-8 md:p-12">
-            <div className="mb-8">
-              <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest block mb-2">Current Clinical Prompt</span>
-              <h2 className="text-2xl font-bold text-slate-800 leading-tight">${currentQuestion.text}</h2>
+            <div className="mb-10">
+              <span className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] mb-3 block">Scenario Prompt</span>
+              <h2 className="text-2xl font-bold text-slate-800 leading-tight">${question.text}</h2>
             </div>
 
             <div className="flex flex-col items-center">
-              ${status === 'PREPARING' && html`
-                <button onClick=${startRecording} className="flex flex-col items-center py-8 group">
-                  <div className="w-20 h-20 border-2 border-dashed border-indigo-200 rounded-full flex items-center justify-center mb-4 text-indigo-300 group-hover:border-indigo-500 group-hover:text-indigo-600 transition-all"><${MicrophoneIcon} /></div>
-                  <span className="font-bold text-sm text-indigo-600">Click to start responding</span>
+              ${status === 'PREP' && html`
+                <button onClick=${record} className="flex flex-col items-center py-10 group w-full">
+                  <div className="w-24 h-24 border-2 border-dashed border-slate-200 rounded-full flex items-center justify-center mb-6 text-slate-300 group-hover:border-indigo-400 group-hover:text-indigo-600 transition-all">
+                    <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-20a3 3 0 00-3 3v8a3 3 0 006 0V5a3 3 0 00-3-3z" /></svg>
+                  </div>
+                  <span className="font-bold text-indigo-600 text-sm">Click to record response</span>
                 </button>
               `}
 
-              ${status === 'RECORDING' && html`
+              ${status === 'REC' && html`
                 <div className="w-full flex flex-col items-center space-y-8">
-                  <${Timer} duration=${currentQuestion.timeLimit} isActive=${true} onComplete=${analyze} />
-                  <div className="w-full p-6 bg-slate-900 rounded-2xl text-slate-300 min-h-[120px] shadow-inner relative">
-                    <div className="absolute top-4 right-4 flex items-center space-x-1.5">
+                  <${Timer} duration=${question.timeLimit} isActive=${true} onComplete=${analyze} />
+                  <div className="w-full p-6 bg-slate-900 rounded-2xl text-slate-400 min-h-[140px] shadow-inner relative border border-slate-800">
+                    <div className="absolute top-4 right-4 flex items-center space-x-1.5 bg-red-500/10 px-2 py-1 rounded-md">
                       <div className="h-2 w-2 bg-red-500 rounded-full animate-pulse"></div>
-                      <span className="text-[9px] font-black text-red-500">LIVE</span>
+                      <span className="text-[9px] font-black text-red-500">LISTENING</span>
                     </div>
-                    <p className="text-sm leading-relaxed font-mono italic">${transcription || "Listening for your response..."}</p>
+                    <p className="text-sm leading-relaxed italic font-medium">${transcript || "Waiting for your answer..."}</p>
                   </div>
-                  <button onClick=${analyze} className="px-12 py-3 bg-slate-800 text-white rounded-xl font-bold shadow-lg">Submit Answer</button>
+                  <button onClick=${analyze} className="w-full py-4 bg-slate-800 text-white rounded-xl font-bold shadow-lg">Submit Clinical Response</button>
                 </div>
               `}
 
-              ${status === 'ANALYZING' && html`
-                <div className="text-center py-16">
+              ${status === 'WAIT' && html`
+                <div className="text-center py-20">
                   <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
-                  <p className="text-slate-400 font-bold italic">Recruiter is reviewing your clinical logic...</p>
+                  <p className="text-slate-400 font-bold italic text-sm">Recruiter scoring your logic...</p>
                 </div>
               `}
             </div>
           </div>
         `}
 
-        ${status === 'FINISHED' && html`
+        ${status === 'DONE' && html`
           <div className="p-8 md:p-12">
-            <div className="flex justify-between items-center mb-10 pb-6 border-b">
-              <h2 className="text-2xl font-black">Performance Summary</h2>
-              <div className="px-3 py-1 bg-green-50 text-green-700 rounded-lg text-[10px] font-black uppercase border border-green-100">Review Ready</div>
+            <div className="flex justify-between items-center mb-10 pb-6 border-b border-slate-100">
+              <h2 className="text-2xl font-black text-slate-800">Review Summary</h2>
+              <div className="px-4 py-2 bg-green-50 text-green-700 rounded-xl text-[10px] font-black uppercase tracking-widest border border-green-100">Clinical Audit Ready</div>
             </div>
 
-            <div className="space-y-6">
+            <div className="space-y-8">
               ${history.map(item => html`
-                <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
+                <div className="group">
                   <div className="flex justify-between items-start mb-6">
-                    <h3 className="font-bold text-slate-800 flex-1 pr-6 leading-snug">${item.q}</h3>
-                    <div className="bg-white px-4 py-2 rounded-xl border border-slate-200 text-center shadow-sm">
-                      <div className="text-2xl font-black text-indigo-600">${item.data.overall}</div>
-                      <div className="text-[8px] text-slate-400 font-black uppercase tracking-tighter">Points</div>
+                    <h3 className="font-bold text-slate-800 flex-1 pr-6 leading-tight text-lg">${item.q}</h3>
+                    <div className="bg-slate-50 px-5 py-3 rounded-2xl border border-slate-200 text-center shadow-sm">
+                      <div className="text-2xl font-black text-indigo-600 leading-none">${item.data.overall}</div>
+                      <div className="text-[9px] text-slate-400 font-black uppercase mt-1">Grade</div>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-x-8">
-                    <${ScoreBar} label="Clinical reasoning" val=${item.data.clinical} />
+                  <div className="grid grid-cols-2 gap-x-8 mb-6">
+                    <${ScoreBar} label="Logic" val=${item.data.clinical} />
                     <${ScoreBar} label="Empathy" val=${item.data.empathy} />
-                    <${ScoreBar} label="Communication" val=${item.data.comm} />
-                    <${ScoreBar} label="Professionalism" val=${item.data.prof} />
+                    <${ScoreBar} label="Comm." val=${item.data.comm} />
                   </div>
-                  <div className="bg-indigo-50 p-4 rounded-xl mt-4 border border-indigo-100 italic text-sm text-slate-700 leading-relaxed shadow-sm">
+                  <div className="bg-indigo-50/50 p-5 rounded-2xl border border-indigo-100 italic text-sm text-slate-700 leading-relaxed font-medium">
                     "${item.data.feedback}"
                   </div>
                 </div>
               `)}
             </div>
-            <button onClick=${() => setStatus('IDLE')} className="w-full mt-10 py-5 bg-slate-900 text-white rounded-2xl font-bold hover:bg-black transition-colors shadow-xl">New Simulation</button>
+            <button onClick=${() => setStatus('IDLE')} className="w-full mt-12 py-5 bg-slate-900 text-white rounded-2xl font-bold shadow-xl">New Session</button>
           </div>
         `}
       </main>
-      <footer className="mt-8 text-[9px] font-black text-slate-400 uppercase tracking-widest">Pediatric OT Clinical Simulator v1.2</footer>
+      <footer className="mt-8 text-[9px] font-black text-slate-400 uppercase tracking-widest">OT Recruiter AI • Pediatric Simulation • v1.3</footer>
     </div>
   `;
 }
