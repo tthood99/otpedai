@@ -1,30 +1,20 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { OT_QUESTIONS } from './constants';
-import { InterviewStatus, Question, InterviewScore, InterviewHistoryItem } from './types';
+import React, { useState, useEffect, useRef } from 'react';
+import { PlayIcon, MicrophoneIcon, ArrowPathIcon, CheckCircleIcon, AcademicCapIcon, UserIcon } from '@heroicons/react/24/solid';
+import { OT_QUESTIONS, RECRUITER_PERSONA } from './constants';
+import { InterviewStatus, InterviewHistoryItem } from './types';
 import { analyzeResponse } from './services/geminiService';
 import Timer from './components/Timer';
-import { 
-  PlayIcon, 
-  MicrophoneIcon, 
-  ArrowPathIcon, 
-  CheckCircleIcon,
-  ChartBarIcon,
-  AcademicCapIcon,
-  ChevronRightIcon
-} from '@heroicons/react/24/solid';
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<InterviewStatus>(InterviewStatus.IDLE);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [history, setHistory] = useState<InterviewHistoryItem[]>([]);
   const [transcription, setTranscription] = useState('');
-  const [isRecognitionActive, setIsRecognitionActive] = useState(false);
   const recognitionRef = useRef<any>(null);
 
   const currentQuestion = OT_QUESTIONS[currentQuestionIndex];
 
-  // Initialize Speech Recognition
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (SpeechRecognition) {
@@ -34,18 +24,17 @@ const App: React.FC = () => {
       recognitionRef.current.lang = 'en-US';
 
       recognitionRef.current.onresult = (event: any) => {
-        let final = '';
+        let interimTranscript = '';
+        let finalTranscript = '';
+
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           if (event.results[i].isFinal) {
-            final += event.results[i][0].transcript;
+            finalTranscript += event.results[i][0].transcript;
+          } else {
+            interimTranscript += event.results[i][0].transcript;
           }
         }
-        setTranscription(prev => prev + ' ' + final);
-      };
-
-      recognitionRef.current.onerror = (event: any) => {
-        console.error('Speech recognition error', event.error);
-        setIsRecognitionActive(false);
+        setTranscription(prev => (prev + ' ' + finalTranscript).trim());
       };
     }
   }, []);
@@ -59,129 +48,142 @@ const App: React.FC = () => {
   const startRecording = () => {
     setTranscription('');
     setStatus(InterviewStatus.RECORDING);
-    setIsRecognitionActive(true);
     if (recognitionRef.current) {
-      recognitionRef.current.start();
+      try {
+        recognitionRef.current.start();
+      } catch (e) {
+        console.warn("Recognition already started or error:", e);
+      }
     }
   };
 
   const stopRecordingAndAnalyze = async () => {
-    setIsRecognitionActive(false);
     if (recognitionRef.current) {
       recognitionRef.current.stop();
     }
     setStatus(InterviewStatus.ANALYZING);
 
     try {
-      const result = await analyzeResponse(currentQuestion.text, transcription);
+      // Use fallback if transcription is empty to avoid API errors
+      const finalTranscript = transcription || "The candidate provided a silent or non-verbal response.";
+      const result = await analyzeResponse(currentQuestion.text, finalTranscript);
+      
       const historyItem: InterviewHistoryItem = {
         question: currentQuestion.text,
-        transcription: transcription.trim(),
+        transcription: finalTranscript,
         score: result
       };
+      
       setHistory(prev => [...prev, historyItem]);
       
       if (currentQuestionIndex < OT_QUESTIONS.length - 1) {
-        setStatus(InterviewStatus.PREPARING);
         setCurrentQuestionIndex(prev => prev + 1);
+        setStatus(InterviewStatus.PREPARING);
       } else {
         setStatus(InterviewStatus.FINISHED);
       }
     } catch (error) {
-      console.error("Analysis failed", error);
-      setStatus(InterviewStatus.IDLE);
+      console.error("Analysis failed:", error);
+      alert("There was an error analyzing your response. Let's try the next one.");
+      setStatus(InterviewStatus.PREPARING);
     }
   };
 
-  const renderProgress = () => (
-    <div className="w-full bg-gray-200 rounded-full h-2 mb-8 overflow-hidden">
-      <div 
-        className="bg-indigo-600 h-2 transition-all duration-500" 
-        style={{ width: `${((currentQuestionIndex + (status === InterviewStatus.FINISHED ? 1 : 0)) / OT_QUESTIONS.length) * 100}%` }}
-      />
-    </div>
-  );
-
   return (
-    <div className="min-h-screen flex flex-col items-center p-4 md:p-12 max-w-5xl mx-auto">
-      <header className="w-full text-center mb-12">
-        <div className="inline-flex items-center justify-center p-3 bg-indigo-100 rounded-2xl mb-4">
-          <AcademicCapIcon className="h-8 w-8 text-indigo-600" />
+    <div className="min-h-screen flex flex-col items-center p-4 md:p-8 bg-slate-50">
+      <header className="w-full max-w-4xl flex items-center justify-between mb-8">
+        <div className="flex items-center space-x-3">
+          <div className="p-2 bg-indigo-600 rounded-lg">
+            <AcademicCapIcon className="h-6 w-6 text-white" />
+          </div>
+          <h1 className="text-xl font-bold text-slate-800">Pediatric OT Recruiter</h1>
         </div>
-        <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight">Pediatric OT Recruiter AI</h1>
-        <p className="mt-2 text-lg text-gray-600">Simulate your clinical interview with professional feedback.</p>
+        {status !== InterviewStatus.IDLE && (
+          <div className="text-sm font-medium text-slate-500">
+            Step {currentQuestionIndex + 1} of {OT_QUESTIONS.length}
+          </div>
+        )}
       </header>
 
-      <main className="w-full bg-white rounded-3xl shadow-xl border border-gray-100 p-8 md:p-12 relative">
+      <main className="w-full max-w-3xl bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         {status === InterviewStatus.IDLE && (
-          <div className="text-center py-12">
-            <h2 className="text-2xl font-bold mb-6">Ready to start your session?</h2>
-            <p className="text-gray-500 mb-8 max-w-md mx-auto">
-              You'll face {OT_QUESTIONS.length} clinical questions. Prepare your mic and find a quiet space.
+          <div className="p-12 text-center">
+            <div className="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <UserIcon className="h-10 w-10 text-indigo-600" />
+            </div>
+            <h2 className="text-2xl font-bold text-slate-900 mb-4">Pediatric Clinic Interview</h2>
+            <p className="text-slate-600 mb-8 leading-relaxed">
+              Hello! I'm your Senior OT Recruiter. I'll be evaluating your clinical reasoning and 
+              family-centered approach for our pediatric department. Are you ready?
             </p>
             <button 
               onClick={startInterview}
-              className="px-10 py-4 bg-indigo-600 text-white rounded-full font-bold text-lg hover:bg-indigo-700 transition-all flex items-center mx-auto space-x-2"
+              className="w-full sm:w-auto px-10 py-4 bg-indigo-600 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all flex items-center justify-center space-x-2 mx-auto"
             >
               <PlayIcon className="h-5 w-5" />
-              <span>Begin Interview</span>
+              <span>Start Interview</span>
             </button>
           </div>
         )}
 
         {(status === InterviewStatus.PREPARING || status === InterviewStatus.RECORDING || status === InterviewStatus.ANALYZING) && (
-          <div className="animate-fade-in">
-            {renderProgress()}
-            <div className="mb-10">
-              <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest bg-indigo-50 px-3 py-1 rounded-full">
-                Question {currentQuestionIndex + 1} of {OT_QUESTIONS.length}
-              </span>
-              <h2 className="text-2xl md:text-3xl font-bold mt-4 leading-snug text-gray-800">
+          <div className="p-8 md:p-12">
+            <div className="mb-8">
+              <div className="flex items-center space-x-2 mb-2">
+                <span className="h-2 w-2 rounded-full bg-indigo-500"></span>
+                <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest">Current Prompt</span>
+              </div>
+              <h2 className="text-2xl font-semibold text-slate-800 leading-snug">
                 {currentQuestion.text}
               </h2>
             </div>
 
-            <div className="flex flex-col items-center justify-center space-y-8">
+            <div className="flex flex-col items-center">
               {status === InterviewStatus.PREPARING && (
-                <div className="text-center">
-                  <p className="text-gray-500 mb-6 italic">Review the question, then click to record your verbal response.</p>
+                <div className="text-center py-6">
                   <button 
                     onClick={startRecording}
-                    className="px-8 py-4 bg-white border-2 border-indigo-600 text-indigo-600 rounded-full font-bold hover:bg-indigo-50 transition-all flex items-center space-x-2"
+                    className="group relative flex flex-col items-center"
                   >
-                    <MicrophoneIcon className="h-5 w-5" />
-                    <span>Start Speaking</span>
+                    <div className="w-20 h-20 bg-white border-2 border-indigo-600 rounded-full flex items-center justify-center mb-4 group-hover:bg-indigo-50 transition-colors">
+                      <MicrophoneIcon className="h-8 w-8 text-indigo-600" />
+                    </div>
+                    <span className="text-indigo-600 font-bold">Click to start responding</span>
                   </button>
                 </div>
               )}
 
               {status === InterviewStatus.RECORDING && (
-                <div className="flex flex-col items-center space-y-6 w-full">
+                <div className="w-full flex flex-col items-center space-y-8">
                   <Timer 
                     duration={currentQuestion.timeLimit} 
                     isActive={true} 
                     onComplete={stopRecordingAndAnalyze} 
                   />
-                  <div className="w-full max-w-lg p-6 bg-red-50 rounded-2xl border border-red-100 text-center relative overflow-hidden">
-                    <div className="flex items-center justify-center space-x-2 mb-4">
-                      <div className="h-3 w-3 bg-red-500 rounded-full animate-pulse" />
-                      <span className="text-red-600 font-bold text-sm">RECORDING LIVE</span>
+                  <div className="w-full p-6 bg-slate-900 rounded-xl text-slate-300 min-h-[120px] relative">
+                    <div className="absolute top-4 right-4 flex items-center space-x-1">
+                      <div className="h-2 w-2 bg-red-500 rounded-full animate-ping"></div>
+                      <span className="text-[10px] font-bold text-red-500">LIVE</span>
                     </div>
-                    <p className="text-gray-700 min-h-[60px]">{transcription || "..."}</p>
-                    <button 
-                      onClick={stopRecordingAndAnalyze}
-                      className="mt-6 px-6 py-2 bg-red-600 text-white rounded-full font-bold hover:bg-red-700 transition-all text-sm"
-                    >
-                      Finish Early
-                    </button>
+                    <p className="text-sm leading-relaxed">
+                      {transcription || "Listening for your clinical response..."}
+                    </p>
                   </div>
+                  <button 
+                    onClick={stopRecordingAndAnalyze}
+                    className="px-8 py-3 bg-slate-800 text-white rounded-lg font-bold hover:bg-slate-700 transition-colors text-sm"
+                  >
+                    Submit Response
+                  </button>
                 </div>
               )}
 
               {status === InterviewStatus.ANALYZING && (
-                <div className="flex flex-col items-center space-y-4 py-12">
-                  <ArrowPathIcon className="h-12 w-12 text-indigo-600 animate-spin" />
-                  <p className="text-gray-600 font-medium">Recruiter is analyzing your clinical reasoning...</p>
+                <div className="text-center py-12">
+                  <div className="inline-block relative">
+                    <ArrowPathIcon className="h-12 w-12 text-indigo-600 animate-spin" />
+                  </div>
+                  <p className="mt-4 text-slate-500 font-medium italic">Evaluating clinical competency...</p>
                 </div>
               )}
             </div>
@@ -189,68 +191,64 @@ const App: React.FC = () => {
         )}
 
         {status === InterviewStatus.FINISHED && (
-          <div className="animate-fade-in">
-             <div className="flex items-center justify-between mb-8">
-                <h2 className="text-3xl font-bold text-gray-900">Interview Summary</h2>
-                <div className="px-4 py-2 bg-green-100 text-green-700 rounded-full flex items-center space-x-2">
-                   <CheckCircleIcon className="h-5 w-5" />
-                   <span className="font-bold">Completed</span>
-                </div>
-             </div>
+          <div className="p-8 md:p-12">
+            <div className="flex items-center justify-between mb-8 pb-8 border-b border-slate-100">
+              <h2 className="text-2xl font-bold text-slate-900">Performance Report</h2>
+              <div className="px-4 py-1.5 bg-green-50 text-green-700 rounded-full text-sm font-bold border border-green-100">
+                Interview Complete
+              </div>
+            </div>
 
-             <div className="space-y-8">
-                {history.map((item, idx) => (
-                  <div key={idx} className="border border-gray-100 rounded-2xl p-6 bg-gray-50 hover:shadow-md transition-shadow">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex-1">
-                        <h3 className="font-bold text-lg text-gray-800">Q: {item.question}</h3>
-                      </div>
-                      <div className="ml-4 flex items-center bg-white px-3 py-1 rounded-lg border border-gray-200">
-                        <span className="text-2xl font-black text-indigo-600">{item.score.overall}</span>
-                        <span className="text-gray-400 text-sm ml-1">/100</span>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                      <ScoreMetric label="Reasoning" val={item.score.clinicalReasoning} />
-                      <ScoreMetric label="Empathy" val={item.score.empathy} />
-                      <ScoreMetric label="Communication" val={item.score.communication} />
-                      <ScoreMetric label="Professionalism" val={item.score.professionalism} />
-                    </div>
-
-                    <div className="bg-white p-4 rounded-xl border border-gray-100">
-                      <p className="text-sm text-gray-500 font-bold uppercase mb-2">Recruiter Feedback</p>
-                      <p className="text-gray-700 leading-relaxed text-sm italic">"{item.score.feedback}"</p>
+            <div className="space-y-6">
+              {history.map((item, idx) => (
+                <div key={idx} className="p-6 bg-slate-50 rounded-xl border border-slate-200">
+                  <div className="flex justify-between items-start mb-4">
+                    <h3 className="font-bold text-slate-800 flex-1 pr-4">{item.question}</h3>
+                    <div className="bg-white px-3 py-1 rounded-lg border border-slate-200 text-center shadow-sm">
+                      <div className="text-xl font-black text-indigo-600 leading-none">{item.score.overall}</div>
+                      <div className="text-[10px] text-slate-400 font-bold">SCORE</div>
                     </div>
                   </div>
-                ))}
-             </div>
 
-             <div className="mt-12 text-center">
-                <button 
-                  onClick={() => setStatus(InterviewStatus.IDLE)}
-                  className="px-8 py-4 bg-indigo-600 text-white rounded-full font-bold hover:bg-indigo-700 transition-all"
-                >
-                  Restart Practice Session
-                </button>
-             </div>
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <ScoreBar label="Reasoning" val={item.score.clinicalReasoning} />
+                    <ScoreBar label="Empathy" val={item.score.empathy} />
+                    <ScoreBar label="Comm." val={item.score.communication} />
+                    <ScoreBar label="Prof." val={item.score.professionalism} />
+                  </div>
+
+                  <div className="bg-white p-4 rounded-lg border border-slate-100 italic text-sm text-slate-600">
+                    "{item.score.feedback}"
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <button 
+              onClick={() => setStatus(InterviewStatus.IDLE)}
+              className="mt-10 w-full py-4 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-colors"
+            >
+              Start New Session
+            </button>
           </div>
         )}
       </main>
 
-      <footer className="mt-12 text-gray-400 text-sm">
-        Designed for Occupational Therapy Students and Professionals. Built with Gemini AI.
+      <footer className="mt-8 text-slate-400 text-xs text-center">
+        © 2024 OT Recruiter AI • Pedatric Clinic Prep • Powered by Google Gemini
       </footer>
     </div>
   );
 };
 
-const ScoreMetric: React.FC<{label: string, val: number}> = ({ label, val }) => (
-  <div className="text-center">
-    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">{label}</p>
-    <div className="text-sm font-bold text-gray-700">{val}/100</div>
-    <div className="w-full bg-gray-200 rounded-full h-1 mt-1">
-      <div className="bg-indigo-400 h-1 rounded-full" style={{ width: `${val}%` }} />
+const ScoreBar: React.FC<{label: string, val: number}> = ({ label, val }) => (
+  <div>
+    <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-1">
+      <span>{label}</span>
+      <span>{val}%</span>
+    </div>
+    <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
+      <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${val}%` }} />
     </div>
   </div>
 );
